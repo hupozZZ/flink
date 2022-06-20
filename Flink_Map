@@ -1,0 +1,97 @@
+/*
+ 不直接使用map方法 实现类似Map方法的功能
+ 
+ map方法 底层调用的是transform方法 需要传入参数 : 1.算子的名称 2.返回值的类型 3.具体数据处理的实现
+ 
+ */
+ 
+public class C06_MapDemo04 {
+
+    public static void main(String[] args) throws Exception {
+
+        StreamExecutionEnvironment env = StreamExecutionEnvironment.createLocalEnvironmentWithWebUI(new Configuration());
+
+        DataStreamSource<String> words = env.socketTextStream("localhost", 8888);
+
+        MapFunction<String, String> mapFunction = new MapFunction<String, String>() {
+            @Override
+            public String map(String s) throws Exception {
+                //将返回值大写
+                return s.toUpperCase();
+            }
+        };
+
+        //map方法底层实际是调用transform方法 传入1.算子的名称 2.返回值的类型 3.具体数据处理的实现
+        SingleOutputStreamOperator<String> upperStream = words.
+                transform("MyMap", TypeInformation.of(String.class), new StreamMap<String, String>(mapFunction));
+
+        upperStream.print();
+        
+        //map方法 实时关联MySQL中的维度数据
+        SingleOutputStreamOperator<Tuple3<String, Integer, String>> res = orders.map(new CategoryNameMapFunction());
+
+        res.print();
+
+        env.execute();
+
+    }
+
+    //
+    public static class CategoryNameMapFunction extends RichMapFunction<String, Tuple3<String, Integer, String>> {
+
+        //私有非静态成员变量 目的是每个task拿到属于自己的连接 放在线程不安全
+        private Connection connection;
+
+        //open中建立外部连接
+        @Override
+        public void open(Configuration parameters) throws Exception {
+            //建立MySQL连接
+             connection = DriverManager.getConnection("jdbc:mysql://linux01:3306/test?characterEncoding=utf-8", "root", "123456");
+
+        }
+
+        @Override
+        public Tuple3<String, Integer, String> map(String line) throws Exception {
+            String[] fields = line.split(",");
+            int cid = Integer.parseInt(fields[1]);
+
+            PreparedStatement preparedStatement = null;
+
+            ResultSet resultSet = null;
+
+            String name = "未知";
+            //使用分类id查询MySQL
+            try {
+                preparedStatement = connection.prepareStatement("select name from tb_orders where cid = ?");
+
+                preparedStatement.setInt(1, cid);
+
+                //执行查询, 返回结果
+                resultSet = preparedStatement.executeQuery();
+
+                //如果查询到的结果
+                if (resultSet.next()){
+                    name = resultSet.getString(1);
+                }
+
+            }finally {
+                //关闭资源
+                //如果
+                if (resultSet != null) resultSet.close();
+                if (preparedStatement != null) preparedStatement.close();
+
+            }
+            return Tuple3.of(fields[0], cid, name);
+        }
+
+
+        @Override
+        public void close() throws Exception {
+            //关闭连接
+            connection.close();
+
+        }
+    }
+}
+
+  
